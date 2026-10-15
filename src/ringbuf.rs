@@ -94,7 +94,7 @@ impl<T, const N: usize, C: ConsumerPolicy> RingBuf<T, N, Single, C> {
         let next = head.wrapping_add(1);
 
         unsafe {
-            let ptr = (*self.data.get()).as_mut_ptr();
+            let ptr: *mut MaybeUninit<T> = self.data.get() as *mut MaybeUninit<T>;
             ptr::write(ptr.add(head % N), MaybeUninit::new(item));
         }
 
@@ -122,7 +122,7 @@ impl<T, const N: usize, C: ConsumerPolicy> RingBuf<T, N, Multi, C> {
                 .is_ok()
             {
                 unsafe {
-                    let ptr = (*self.data.get()).as_mut_ptr();
+                    let ptr: *mut MaybeUninit<T> = self.data.get() as *mut MaybeUninit<T>;
                     ptr::write(ptr.add(head % N), MaybeUninit::new(item));
                 }
 
@@ -149,8 +149,8 @@ impl<T, const N: usize, P: ProducerPolicy> RingBuf<T, N, P, Single> {
         }
 
         let item = unsafe {
-            let ptr = (*self.data.get()).as_mut_ptr();
-            MaybeUninit::assume_init(ptr::read(ptr.add(head % N)))
+            let array_ptr: *const MaybeUninit<T> = self.data.get() as *const MaybeUninit<T>;
+            MaybeUninit::assume_init(ptr::read(array_ptr.add(head % N)))
         };
 
         self.read_head.store(head.wrapping_add(1), Ordering::Release);
@@ -178,8 +178,8 @@ impl<T, const N: usize, P: ProducerPolicy> RingBuf<T, N, P, Multi> {
             .is_ok()
             {
                 let item = unsafe {
-                    let ptr = (*self.data.get()).as_mut_ptr();
-                    MaybeUninit::assume_init(ptr::read(ptr.add(head % N)))
+                    let array_ptr: *const MaybeUninit<T> = self.data.get() as *const MaybeUninit<T>;
+                    MaybeUninit::assume_init(ptr::read(array_ptr.add(head % N)))
                 };
 
                 while self.read_tail.load(Ordering::Acquire) != head {
@@ -215,6 +215,8 @@ impl<T, const N: usize, P: ProducerPolicy, C: ConsumerPolicy> Drop for RingBuf<T
 #[cfg(test)]
 mod ringbuf_tests {
     use super::*;
+
+    extern crate std;
 
     #[test]
     fn push_pop() {
@@ -302,14 +304,13 @@ mod ringbuf_tests {
     fn mpsc_four_producers() {
         static BUF: MpscRingBuf<i32, 32> = MpscRingBuf::new();
 
-        let mut handles = vec![];
+        let mut handles = std::vec![];
         
         for t in 0..4 {
             handles.push(std::thread::spawn(move || {
                 for i in 0..100 {
                     loop {
                         let item = t * 100 + i;
-                        dbg!(item);
                         match BUF.push(item) {
                             Ok(()) => break,
                             Err(_) => std::thread::yield_now(),
@@ -320,9 +321,8 @@ mod ringbuf_tests {
         }
 
         let consumer = std::thread::spawn(move || {
-            let mut received = vec![0usize; 400];
+            let mut received = std::vec![0usize; 400];
             let mut collected = 0;
-            dbg!(collected);
             
             while collected < 400 {
                 match BUF.pop() {
@@ -358,7 +358,7 @@ mod ringbuf_tests {
         static PRODUCED: AtomicUsize = AtomicUsize::new(0);
         static CONSUMED: AtomicUsize = AtomicUsize::new(0);
 
-        let mut handles = vec![];
+        let mut handles = std::vec![];
 
         for t in 0..4 {
             handles.push(std::thread::spawn(move || {
